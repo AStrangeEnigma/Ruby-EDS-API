@@ -9,6 +9,8 @@ require 'json'
 module EDSApi
 	API_URL = "http://eds-api.ebscohost.com/"
 	API_URL_S = "https://eds-api.ebscohost.com/"
+	SESSION_EXPIRED_ERRORS = ["108"]
+	AUTH_EXPIRED_ERRORS = ["104"]
 	
 	# Connection object. Does what it says. ConnectionHandler is what is usually desired and wraps auto-reonnect features, etc.
 	class Connection
@@ -51,7 +53,12 @@ module EDSApi
 			https = Net::HTTP.new(uri.hostname, uri.port)
 			https.use_ssl = true
 			https.verify_mode = OpenSSL::SSL::VERIFY_NONE
-			doc = JSON.parse(https.request(req).body)
+			case format
+			when :json
+			  doc = JSON.parse(https.request(req).body)
+			else
+			  # XML XML XML
+			end
 			@auth_token = doc['AuthToken']
 		end
 		# Create the session
@@ -120,10 +127,10 @@ module EDSApi
 			loop do
 				result = JSON.parse(super(options, session_token, format))
 			  if result.has_key?('ErrorNumber')
-				  case result['ErrorNumber']
-				  	when "108"
+				  case
+				  	when SESSION_EXPIRED_ERRORS.include? result['ErrorNumber']
 				  		session_token = self.create_session
-				  	when "104"
+				  	when AUTH_EXPIRED_ERRORS.include? result['ErrorNumber']
 				  		self.uid_authenticate(:json)
 				  end
 				  if ++attempts == @max_retries
@@ -139,10 +146,10 @@ module EDSApi
 			loop do
 				result = JSON.parse(super(session_token, format)) # JSON Parse
 			  if result.has_key?('ErrorNumber')
-				  case result['ErrorNumber']
-				  	when "108"
+				  case
+				  	when SESSION_EXPIRED_ERRORS.include? result['ErrorNumber']
 				  		session_token = self.create_session
-				  	when "104"
+				  	when AUTH_EXPIRED_ERRORS.include? result['ErrorNumber']
 				  		self.uid_authenticate(:json)
 				  end
 				  if ++attempts == @max_retries
@@ -158,10 +165,10 @@ module EDSApi
 			loop do
 				result = JSON.parse(super(dbid, an, session_token, format))
 			  if result.has_key?('ErrorNumber')
-				  case result['ErrorNumber']
-				  	when "108"
+				  case
+				  	when SESSION_EXPIRED_ERRORS.include? result['ErrorNumber']
 				  		session_token = self.create_session
-				  	when "104"
+				  	when AUTH_EXPIRED_ERRORS.include? result['ErrorNumber']
 				  		self.uid_authenticate(:json)
 				  end
 				  if ++attempts == @max_retries
@@ -173,25 +180,4 @@ module EDSApi
 		  end
 		end
 	end
-end
-
-# Benchmark response times
-def benchmark(q = false)
-	start = Time.now
-	connection = EDSApi::ConnectionHandler.new(2)
-	connection.uid_init('USERID', 'PASSWORD', 'PROFILEID')
-	connection.uid_authenticate(:json)
-	puts((start - Time.now).abs) unless q
-	connection.create_session
-	puts((start - Time.now).abs) unless q
-	connection.search('query-1=AND,galapagos+hawk', :json)
-	puts((start - Time.now).abs) unless q
-	connection.end_session
-	puts((start - Time.now).abs) unless q
-end
-
-# Run benchmark with warm up run; only if file was called directly and not required
-if __FILE__ == $0
-	benchmark(true)
-	benchmark
 end
